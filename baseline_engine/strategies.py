@@ -1,33 +1,38 @@
-class Strategy:
-    def evaluate(self, features):
-        raise NotImplementedError
+RPC_LIST = ["cloudflare", "publicnode", "llamarpc"]
+
+rr_index = 0
 
 
-class LargeTransactionStrategy(Strategy):
-
-    def __init__(self, threshold=10000):
-        self.threshold = threshold
-
-    def evaluate(self, features):
-        if features["value"] > self.threshold:
-            return 0.7
-        return 0.0
+def single_rpc(rows):
+    """
+    Always choose the same RPC.
+    """
+    return "publicnode"
 
 
-class HighFrequencyStrategy(Strategy):
+def round_robin(rows):
+    """
+    Rotate between RPC providers.
+    """
+    global rr_index
 
-    def __init__(self, limit=10):
-        self.limit = limit
+    rpc = RPC_LIST[rr_index]
+    rr_index = (rr_index + 1) % len(RPC_LIST)
 
-    def evaluate(self, features):
-        if features["tx_count_last_min"] > self.limit:
-            return 0.6
-        return 0.0
+    return rpc
 
 
-class NewAddressStrategy(Strategy):
+def lowest_latency(rows):
+    """
+    Choose RPC with the lowest latency.
+    """
+    best = rows.loc[rows["latency_ms"].idxmin()]
+    return best["rpc_id"]
 
-    def evaluate(self, features):
-        if features["address_age_days"] < 1:
-            return 0.5
-        return 0.0
+
+def freshest_block(rows):
+    """
+    Choose RPC with smallest block lag.
+    """
+    best = rows.loc[rows["block_lag"].idxmin()]
+    return best["rpc_id"]

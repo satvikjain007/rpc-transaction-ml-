@@ -1,40 +1,91 @@
+import pandas as pd
+import numpy as np
+
 from baseline_engine.strategies import (
-    LargeTransactionStrategy,
-    HighFrequencyStrategy,
-    NewAddressStrategy
+    single_rpc,
+    round_robin,
+    lowest_latency,
+    freshest_block,
 )
 
-from data.feature_extractor import FeatureExtractor
+# Load datasets
+rpc_metrics = pd.read_csv("data/rpc_metrics.csv")
+tx_outcomes = pd.read_csv("data/tx_outcomes.csv")
 
 
-class Evaluator:
+def simulate(strategy):
+    """
+    Simulate strategy decisions across timestamps.
+    """
 
-    def __init__(self):
+    delays = []
+    failures = 0
 
-        self.feature_extractor = FeatureExtractor()
+    grouped = rpc_metrics.groupby("timestamp")
 
-        self.strategies = [
-            LargeTransactionStrategy(),
-            HighFrequencyStrategy(),
-            NewAddressStrategy()
-        ]
+    for timestamp, rows in grouped:
 
-    def evaluate_transaction(self, tx):
+        rpc_choice = strategy(rows)
 
-        features = self.feature_extractor.extract_features(tx)
+        tx = tx_outcomes[tx_outcomes["rpc_id"] == rpc_choice]
 
-        risk_score = 0
+        if not tx.empty:
+            delay = tx.iloc[0]["confirmation_delay_seconds"]
+            delays.append(delay)
+        else:
+            failures += 1
 
-        for strategy in self.strategies:
-            risk_score += strategy.evaluate(features)
+    return delays, failures
 
-        risk_score = min(risk_score, 1.0)
 
-        result = {
-            "transaction": tx,
-            "features": features,
-            "risk_score": risk_score,
-            "flagged": risk_score > 0.7
-        }
+def mean_delay(values):
+    return np.mean(values) if values else 0
 
-        return result
+
+def median_delay(values):
+    return np.median(values) if values else 0
+
+
+def p95_delay(values):
+    return np.percentile(values, 95) if values else 0
+
+
+def failure_rate(failures, total):
+    return failures / total if total > 0 else 0
+
+
+def run_baselines():
+
+    strategies = {
+        "single_rpc": single_rpc,
+        "round_robin": round_robin,
+        "lowest_latency": lowest_latency,
+        "freshest_block": freshest_block,
+    }
+
+    results = []
+
+    for name, strategy in strategies.items():
+
+        delays, failures = simulate(strategy)
+
+        total = len(delays) + failures
+
+        results.append({
+            "strategy": name,
+            "mean_delay": mean_delay(delays),
+            "median_delay": median_delay(delays),
+            "p95_delay": p95_delay(delays),
+            "failure_rate": failure_rate(failures, total),
+            "n": len(delays)
+        })
+
+    df = pd.DataFrame(results)
+
+    print(df)
+
+    df.to_csv("results/baseline_results.csv", index=False)
+
+
+if __name__ == "__main__":
+    run_baselines()
